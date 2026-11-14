@@ -5,13 +5,17 @@ export function particleCloud(capacity, { drift = 0, pulse = 0, rate = 1, depthT
   const data = {
     position: new T.BufferAttribute(new Float32Array(capacity * 3), 3),
     tint: new T.BufferAttribute(new Float32Array(capacity * 3), 3),
-    style: new T.BufferAttribute(new Float32Array(capacity * 4), 4)
+    style: new T.BufferAttribute(new Float32Array(capacity * 4), 4),
+    cloth: new T.BufferAttribute(new Float32Array(capacity * 2), 2)
   };
   const geometry = new T.BufferGeometry();
   for (const [key, attribute] of Object.entries(data)) {
     geometry.setAttribute(key, attribute.setUsage(T.DynamicDrawUsage));
   }
   const uniforms = {
+    windClock: { value: 0 }, windMotion: { value: 0 },
+    windStrength: { value: C.WIND_STRENGTH }, windSpeed: { value: C.WIND_WAVE_SPEED },
+    windTrail: { value: C.WIND_TRAIL_LENGTH },
     clock: { value: 0 }, dpr: { value: 1 }, drift: { value: drift },
     pulse: { value: pulse }, rate: { value: rate }, chroma: { value: C.RENDER.CHROMATIC_OFFSET }
   };
@@ -19,6 +23,8 @@ export function particleCloud(capacity, { drift = 0, pulse = 0, rate = 1, depthT
     uniforms, transparent: true, depthWrite: false, depthTest, blending: T.AdditiveBlending,
     vertexShader: `
       uniform float clock,dpr,drift,pulse,rate;
+      uniform float windClock,windMotion,windStrength,windSpeed,windTrail;
+      attribute vec2 cloth;
       attribute vec3 tint;
       attribute vec4 style;
       varying vec3 rgb;
@@ -27,11 +33,13 @@ export function particleCloud(capacity, { drift = 0, pulse = 0, rate = 1, depthT
         vec3 p=position;
         float phase=style.w*37.;
         p+=drift*vec3(sin(clock*1.1+phase),cos(clock*.81+phase),sin(clock*.63+phase));
+        float wave=.5+.5*sin(windClock*windSpeed-position.x*9.+position.y*1.7-cloth.y*.72);
+        p.x+=windMotion*cloth.x*(windStrength*wave+windTrail*cloth.y*(.26+.74*wave));
         vec4 view=modelViewMatrix*vec4(p,1.);
         gl_Position=projectionMatrix*view;
         float size=style.x*clamp(9./max(.1,-view.z),.55,1.65);
         gl_PointSize=max(1.,size*dpr);
-        rgb=tint*style.y*(1.+pulse*sin(clock*rate+phase));
+        rgb=tint*style.y*(1.+pulse*sin(clock*rate+phase))*(1.-step(.001,cloth.y)*(1.-windMotion));
         mark=vec4(style.z,style.w,size,0.);
       }`,
     fragmentShader: `
@@ -67,10 +75,11 @@ export function particleCloud(capacity, { drift = 0, pulse = 0, rate = 1, depthT
   points.frustumCulled = false;
   return {
     points, uniforms, geometry,
-    write(i,x,y,z,color,size,emission,shape,seed) {
+    write(i,x,y,z,color,size,emission,shape,seed,windWeight=0,trail=0) {
       data.position.setXYZ(i,x,y,z);
       data.tint.setXYZ(i,color.r,color.g,color.b);
       data.style.setXYZW(i,size,emission,shape,seed);
+      data.cloth.setXY(i,windWeight,trail);
     },
     flush() { for (const a of Object.values(data)) a.needsUpdate = true; }
   };

@@ -17,4 +17,4 @@
 
 - `assets/draco_ref.jpg` 由上传的 09.png 转存，保持 1536 × 1024 尺寸、构图和内容。
 - `assets/draco_depth.png` 来自 Depth Anything V2 Small 的 ONNX UINT8 模型本地推理。输入为原图，归一化为 8 位相对逆深度，亮处更近，输出与原图对齐。
-- 纸鹤由 16 个三角面组成，折面光照与发光轮廓独立绘制。
+- 纸鹤使用提供的 `crane_geometry.js`，共 30 个三角面。透明折面、发光折痕和内部星点分别绘制。

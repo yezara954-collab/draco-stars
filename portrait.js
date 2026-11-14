@@ -33,6 +33,7 @@ export async function makePortrait(capacity) {
   const [photo,depth]=await Promise.all([readImage('./assets/draco_ref.jpg'),readImage('./assets/draco_depth.png')]);
   if (photo.width !== depth.width || photo.height !== depth.height) throw new Error('照片与深度图像素尺寸须一致');
   const aspect=photo.width/photo.height;
+  const smooth=T.MathUtils.smoothstep;
   const width=C.PORTRAIT.SAMPLE_WIDTH, height=Math.round(width/aspect);
   const rgb=imagePixels(photo,width,height), z=imagePixels(depth,width,height);
   const [cx,cy]=C.MASK.CROP_CENTER;
@@ -70,7 +71,13 @@ export async function makePortrait(capacity) {
       (contour?C.PORTRAIT.EDGE_EMISSION:0)+edgeLight*.56)*bottom;
     const shape=highlights>.38 && seed<C.PORTRAIT.SPARK_CHANCE ? (seed<.01?4:1) : 0;
     const size=C.PORTRAIT.BASE_SIZE+C.PORTRAIT.HIGHLIGHT_SIZE*highlights+(shape?4:0);
-    accepted.push({p,color,size,energy,shape,seed});
+    const hoodBack=smooth(u,C.WIND.HOOD_BACK_START,C.WIND.HOOD_BACK_START+.10);
+    const shoulder=smooth(v,C.WIND.SHOULDER_START,C.WIND.SHOULDER_START+.16);
+    const edgeWeight=1-smooth(rim.nearest,C.MASK.EDGE_WIDTH,C.WIND.EDGE_WIDTH);
+    const distance=Math.min(1,Math.hypot(p.x,p.y)*1.6);
+    // 保持脸与飞发的采样原样，风权重只落在衣料外缘。
+    const windWeight=enclosed&&!hair ? Math.max(hoodBack,shoulder)*edgeWeight*distance : 0;
+    accepted.push({p,color,size,energy,shape,seed,windWeight});
     if (hair && seed<C.PORTRAIT.HAIR_TRAIL_CHANCE) for (let i=1;i<=C.PORTRAIT.HAIR_BEADS;i++) {
       const tail=p.clone();
       tail.x-=i*C.PORTRAIT.HAIR_SPACING;
@@ -83,13 +90,30 @@ export async function makePortrait(capacity) {
     [accepted[i],accepted[j]]=[accepted[j],accepted[i]];
   }
   const debugCount=Math.min(rejected.length,Math.floor(capacity*.2));
-  const portraitCount=Math.min(capacity-debugCount,Math.round(accepted.length*T.MathUtils.clamp(C.POINT_DENSITY,0,1)));
-  const samples=accepted.slice(0,portraitCount);
+  const densityCount=Math.round(accepted.length*T.MathUtils.clamp(C.POINT_DENSITY,0,1));
+  const available=capacity-debugCount;
+  const windTailEnabled=C.WIND_STRENGTH>0 && C.WIND_TRAIL_LENGTH>0;
+  const samples=[];
+  const tailChance=C.WIND.TRAIL_CHANCE;
+  // 预留少量点数给布边拖尾，并让每条短尾与原点一起进入质量降级顺序。
+  const tailBudget=windTailEnabled ? Math.min(Math.round(available*.08),Math.round(densityCount*.08)) : 0;
+  const baseCount=Math.min(available-tailBudget,densityCount);
+  let tails=0;
+  for(const point of accepted.slice(0,baseCount)){
+    samples.push(point);
+    if(!windTailEnabled || point.windWeight<.18 || point.seed>=tailChance) continue;
+    for(let i=1;i<=C.WIND.TRAIL_COUNT&&tails<tailBudget;i++,tails++){
+      const trail=i/C.WIND.TRAIL_COUNT;
+      samples.push({...point,trail,size:point.size*.68,energy:point.energy*(1-trail*.75)*.62,shape:0});
+    }
+  }
+  for(let i=baseCount;i<densityCount&&samples.length<available;i++) samples.push(accepted[i]);
   for(let i=0;i<debugCount;i++) samples.splice(Math.floor(i*samples.length/debugCount),0,rejected[i]);
   const cloud=particleCloud(samples.length,{
     drift:C.PORTRAIT.POINT_DRIFT, pulse:C.PORTRAIT.PULSE, rate:C.PORTRAIT.PULSE_RATE
   });
-  samples.forEach(({p,color,size,energy,shape,seed},i)=>cloud.write(i,p.x,p.y,p.z,color,size,energy,shape,seed));
+  samples.forEach(({p,color,size,energy,shape,seed,windWeight,trail},i)=>
+    cloud.write(i,p.x,p.y,p.z,color,size,energy,shape,seed,windWeight,trail));
   cloud.flush();
   return {cloud,count:samples.length,local,width:aspect*(C.PORTRAIT.HIT_BOUNDS[2]-C.PORTRAIT.HIT_BOUNDS[0])/C.MASK.IMAGE_HEIGHT};
 }

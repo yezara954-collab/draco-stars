@@ -27,25 +27,19 @@ const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 const limit=Math.min(mobile?15000:40000,mobile?C.RENDER.MOBILE_LIMIT:C.RENDER.DESKTOP_LIMIT,
   mobile?C.RENDER.MOBILE_BUDGET:C.RENDER.DESKTOP_BUDGET);
 const skyCount=Math.min(C.SKY.COUNT,Math.floor(limit*.10));
-const breathCount=Math.min(C.BREATH.COUNT+C.BREATH.STREAMS*C.BREATH.BEADS,Math.floor(limit*.3));
-const portrait=await makePortrait(limit-skyCount-breathCount);
+const breathCount=Math.min(C.BREATH_COUNT,Math.floor(limit*.3));
+const craneStarCount=Math.min(C.CRANE.STAR_COUNT,Math.floor(limit*.02));
+const portrait=await makePortrait(limit-skyCount-breathCount-craneStarCount);
 const Draco=new T.Group();
 Draco.add(portrait.cloud.points);
 scene.add(Draco);
 const mouth=portrait.local(...C.MOUTH_POS);
-const crane=makeCrane();
+const crane=makeCrane(craneStarCount);
 const sky=particleCloud(skyCount,{pulse:.57,rate:.48});
 const breath=particleCloud(breathCount,{depthTest:true});
 scene.add(sky.points,breath.points,crane.group);
 breath.geometry.setDrawRange(0,0);
 crane.alpha(0);
-const [ambient,key,back]=C.CRANE.LIGHTS;
-scene.add(new T.HemisphereLight(C.COLORS.PALE_GOLD,C.COLORS.CYAN,ambient));
-const keyLight=new T.DirectionalLight(C.COLORS.PALE_GOLD,key);
-keyLight.position.set(-2,4,5);
-const backLight=new T.DirectionalLight(C.COLORS.WHITE,back);
-backLight.position.set(3,1,-4);
-scene.add(keyLight,backLight);
 const rng=randomSequence(989);
 const white=new T.Color(C.COLORS.WHITE), gold=new T.Color(C.COLORS.GOLD);
 const cream=new T.Color(C.COLORS.PALE_GOLD), cyan=new T.Color(C.COLORS.CYAN);
@@ -71,7 +65,7 @@ const effects=Array.from({length:breathCount},(_,i)=>{
 });
 const origin=new T.Vector3(), goal=new T.Vector3(), end=new T.Vector3(), p=new T.Vector3();
 const pointer=new T.Vector2(), lean=new T.Vector2(), projected=new T.Vector3();
-const hover=new T.Vector3();
+const hover=new T.Vector3(), breathEnd=new T.Vector3();
 let width=1,height=1,layout='landscape',viewHeight=1,viewWidth=1;
 let quality=0, fpsTime=0, fpsFrames=0, raf=0, last=0, clock=0, elapsed=0;
 let playing=C.DEBUG_START_STATE===1||C.DEBUG_START_STATE===2;
@@ -92,7 +86,7 @@ function resize(){
   renderer.setSize(width,height,false);
   composer.setPixelRatio(dpr);
   composer.setSize(width,height);
-  for(const cloud of [sky,portrait.cloud,breath]) cloud.uniforms.dpr.value=dpr;
+  for(const cloud of [sky,portrait.cloud,breath,crane.stars]) cloud.uniforms.dpr.value=dpr;
   const fraction=C.RENDER.QUALITY[quality];
   sky.geometry.setDrawRange(0,Math.floor(skyCount*fraction));
   portrait.cloud.geometry.setDrawRange(0,Math.floor(portrait.count*fraction));
@@ -119,16 +113,17 @@ function updateContent(motion){
   if(reduced.matches && (done||t>=C.BREATH.REDUCED_DURATION)) paper=1;
   hover.y+=Math.sin(t*C.CRANE.HOVER_RATE)*C.CRANE.HOVER*paper*motion;
   crane.group.position.copy(hover);
-  crane.group.scale.setScalar(Math.min(viewWidth,viewHeight)*C.CRANE.SIZE[layout]*mix(C.CRANE.FORM_INITIAL_SCALE,1,paper));
-  crane.pose(t,motion*paper);
+  crane.group.scale.setScalar(Math.min(viewWidth,viewHeight)*C.CRANE_SCALE[layout]*mix(C.CRANE.FORM_INITIAL_SCALE,1,paper));
+  crane.pose(t,motion,paper);
   crane.alpha(paper);
   crane.group.updateMatrixWorld(true);
   if(!playing || reduced.matches){
     breath.geometry.setDrawRange(0,0);
     return;
   }
+  breathEnd.copy(origin).lerp(goal,C.BREATH_LENGTH);
   const flight=new T.CubicBezierCurve3(...C.BREATH.CURVE.map(([x,y,z])=>new T.Vector3(
-    mix(origin.x,goal.x,x),mix(origin.y,goal.y,x)+y,mix(origin.z,goal.z,x)+z
+    mix(origin.x,breathEnd.x,x),mix(origin.y,breathEnd.y,x)+y,mix(origin.z,breathEnd.z,x)+z
   )));
   let visible=0;
   const allowed=Math.floor(breathCount*C.RENDER.QUALITY[quality]);
@@ -142,22 +137,22 @@ function updateContent(motion){
     flight.getPoint(f,p);
     const plume=Math.sin(f*Math.PI*.64);
     const spin=head.phase*2*Math.PI+f*Math.PI*1.8;
-    p.x+=(head.r-.5)*C.BREATH.SPREAD[0]*plume;
-    p.y+=(Math.cos(spin)*(.24+head.r*.76))*C.BREATH.SPREAD[1]*plume;
-    p.z+=(Math.sin(spin)*(.24+head.s*.76))*C.BREATH.SPREAD[2]*plume;
+    p.x+=(head.r-.5)*C.BREATH_SPREAD[0]*plume;
+    p.y+=(Math.cos(spin)*(.24+head.r*.76))*C.BREATH_SPREAD[1]*plume;
+    p.z+=(Math.sin(spin)*(.24+head.s*.76))*C.BREATH_SPREAD[2]*plume;
     if(form>0){
-      const face=crane.faces[a.face];
+      const {mesh,vertices:face}=crane.faces[a.face];
       const s=Math.sqrt(a.a);
       end.copy(face[0]).multiplyScalar(1-s).addScaledVector(face[1],s*(1-a.b)).addScaledVector(face[2],s*a.b);
-      end.multiplyScalar(1+(a.s-.5)*C.BREATH.GATHER_WIDTH*(1-form)).applyMatrix4(crane.group.matrixWorld);
+      end.multiplyScalar(1+(a.s-.5)*C.BREATH.GATHER_WIDTH*(1-form)).applyMatrix4(mesh.matrixWorld);
       p.lerp(end,form);
     }
     const energy=mix(...C.BREATH.LUMINANCE,a.phase)*(a.bead?1-a.trail/C.BREATH.BEADS*.65:1);
     const opacity=smooth(age,0,.09)*(1-smooth(form,.69,1));
-    breath.write(visible++,p.x,p.y,p.z,a.tint,a.size,energy*opacity,a.kind,a.phase);
+    breath.write(visible++,p.x,p.y,p.z,a.tint,a.size*C.BREATH_SIZE,energy*opacity*C.BREATH_BRIGHTNESS,a.kind,a.phase);
   }
   const flash=Math.sin(Math.PI*smooth(form,.79,1))*C.BREATH.FLASH;
-  if(flash>0 && visible<breathCount) breath.write(visible++,goal.x,goal.y,goal.z,white,C.BREATH.SPARK_SIZE*2,flash*5,4,.4);
+  if(flash>0 && visible<breathCount) breath.write(visible++,goal.x,goal.y,goal.z,white,C.BREATH.SPARK_SIZE*2*C.BREATH_SIZE,flash*5*C.BREATH_BRIGHTNESS,4,.4);
   breath.geometry.setDrawRange(0,visible);
   breath.flush();
 }
@@ -205,6 +200,8 @@ function frame(now){
   updateHitArea();
   sky.uniforms.clock.value=clock;
   if(!playing) portrait.cloud.uniforms.clock.value=clock;
+  portrait.cloud.uniforms.windClock.value=clock;
+  portrait.cloud.uniforms.windMotion.value=motion;
   composer.render(dt);
   if(raw>0 && !reduced.matches) {
     fpsFrames++;fpsTime+=raw;
