@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>Draco Malfoy · 星空</title>
+<link rel="stylesheet" href="./style.css">
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<main id="stage" aria-label="Draco Malfoy 星空互动">
+<canvas id="scene" aria-hidden="true"></canvas>
+<button id="portrait" type="button" aria-label="点击 Draco 吹出星尘" hidden><span>click</span></button>
+<button id="orientation" type="button" hidden>启用体感</button>
+<p id="notice" role="status">正在载入星空…</p>
+</main>
+<script type="module">
+const notice = document.querySelector('#notice');
+import('./main.js').catch(error => {
+  console.error(error);
+  notice.textContent = '星空加载失败。请通过 HTTP 打开页面，并检查网络、WebGL 2 和 assets 文件。';
+});
+</script>
+</body>
+</html>
